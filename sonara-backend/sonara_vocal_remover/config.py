@@ -40,4 +40,9 @@ BLOCKED_PLATFORM_HOSTS: FrozenSet[str] = frozenset(
 DEFAULT_MODEL = "htdemucs"
 DEFAULT_DEVICE = "cpu"
 
+# Processing timeout in seconds. Demucs processing time depends on track
+# length and device (CPU is slower than CUDA). 600 seconds (10 minutes) is
+# a reasonable MVP default that accommodates typical tracks on CPU.
+DEFAULT_PROCESSING_TIMEOUT_SECONDS = 600.0
+
 DEFAULT_LIMITS = DownloadLimits()

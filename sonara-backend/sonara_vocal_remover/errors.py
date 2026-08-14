@@ -71,5 +71,9 @@ class InvalidOutputPathError(SonaraError):
     """Output directory could not be created or written to."""
 
 
+class ProcessingTimeoutError(SonaraError):
+    """Separation processing exceeded the configured timeout."""
+
+
 class ProcessingFailureError(SonaraError):
     """Separation engine failed for a reason not covered above."""

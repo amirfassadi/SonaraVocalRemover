@@ -34,6 +34,7 @@ from sonara_vocal_remover.errors import (
     MissingFFmpegError,
     MissingModelError,
     ProcessingFailureError,
+    ProcessingTimeoutError,
     SonaraError,
     TooManyRedirectsError,
     UnsupportedAudioFormatError,
@@ -62,6 +63,7 @@ _ERROR_STATUS = {
     InvalidOutputPathError: 400,
     UrlDownloadError: 502,
     DownloadTimeoutError: 504,
+    ProcessingTimeoutError: 504,
     FileTooLargeError: 413,
     TooManyRedirectsError: 502,
     MissingFFmpegError: 503,
@@ -142,7 +144,7 @@ async def separate(
             tmp_path = tmp_dir / f"upload{ext}"
             with open(tmp_path, "wb") as f:
                 shutil.copyfileobj(file.file, f)
-            source = LocalFileSource(str(tmp_path))
+            source = LocalFileSource(str(tmp_path), is_temporary=True)
 
         service = VocalRemovalService(model=model, device=device)
         result = service.process(source=source, output_dir=str(job_dir))

@@ -17,7 +17,7 @@ import ipaddress
 import socket
 import tempfile
 from pathlib import Path
-from urllib.parse import urlparse
+from urllib.parse import urlparse, urljoin
 
 import requests
 
@@ -140,7 +140,8 @@ class UrlSource(InputSource):
                 location = response.headers.get("Location")
                 if not location:
                     raise UrlDownloadError("Redirect response missing Location header")
-                current_url = location
+                # Resolve relative redirects (e.g., "/audio/song.mp3") relative to the current URL
+                current_url = urljoin(current_url, location)
                 _validate_url(current_url)  # re-validate every hop against SSRF/scheme rules
                 continue
 

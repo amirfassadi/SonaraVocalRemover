@@ -3,7 +3,7 @@ requests>=2.31
 
 # Separation engine (heavy: pulls in torch). Install separately if you
 # only want to test input/security logic without the full ML stack.
-demucs>=4.0.1
+demucs==4.0.2
 
 # API layer
 fastapi>=0.110

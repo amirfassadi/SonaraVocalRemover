@@ -9,8 +9,9 @@ from sonara_vocal_remover.sources.base import InputSource
 class LocalFileSource(InputSource):
     """Acquires audio from a file already on disk."""
 
-    def __init__(self, path: str):
+    def __init__(self, path: str, is_temporary: bool = False):
         self._path = Path(path)
+        self._is_temporary = is_temporary
 
     def acquire(self) -> AudioResource:
         if not self._path.exists():
@@ -25,4 +26,4 @@ class LocalFileSource(InputSource):
                 f"Unsupported extension '{ext}'. Supported: {supported}"
             )
 
-        return AudioResource(path=self._path, origin="local_file", is_temporary=False)
+        return AudioResource(path=self._path, origin="local_file", is_temporary=self._is_temporary)
