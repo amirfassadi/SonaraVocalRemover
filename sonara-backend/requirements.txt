@@ -1,5 +1,6 @@
 # Core
 requests>=2.31
+PyYAML>=6.0
 
 # Separation engine (heavy: pulls in torch). Install separately if you
 # only want to test input/security logic without the full ML stack.
