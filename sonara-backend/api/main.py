@@ -41,6 +41,7 @@ from sonara_vocal_remover.errors import (
     UnsupportedUrlSchemeError,
     UrlDownloadError,
 )
+from sonara_vocal_remover.models import ModelRegistry
 from sonara_vocal_remover.service import VocalRemovalService
 from sonara_vocal_remover.sources import LocalFileSource, UrlSource
 from sonara_vocal_remover.sources.url import _validate_url  # reused for /validate-url
@@ -87,10 +88,28 @@ def _error_response(exc: SonaraError) -> JSONResponse:
 
 @app.get("/api/health")
 def health():
+    """
+    Health check endpoint.
+    
+    Reports the default model and engine, plus all supported audio formats.
+    Note: the system may support multiple separation engines (Demucs, MSST, etc)
+    depending on available models in the registry, but this endpoint reports
+    the default configuration.
+    """
+    registry = ModelRegistry()
+    enabled_models = registry.list_enabled()
+    engines = set()
+    for model_def in enabled_models:
+        backend_name = (model_def.backend or {}).get("name", "unknown")
+        engines.add(backend_name)
+    engines.add("demucs")  # Default engine always available
+    
     return {
         "status": "ok",
         "version": "0.1.0-mvp",
         "engine": f"Demucs ({DEFAULT_MODEL})",
+        "default_model": DEFAULT_MODEL,
+        "supported_engines": sorted(engines),
         "supported_formats": sorted(SUPPORTED_AUDIO_EXTENSIONS),
     }
 
@@ -152,11 +171,20 @@ async def separate(
     except SonaraError as exc:
         return _error_response(exc)
 
-    return {
+    # Build response with new stems dict + legacy backward-compatible fields
+    response = {
         "job_id": job_id,
-        "vocals_url": f"/files/{job_id}/vocals.wav",
-        "instrumental_url": f"/files/{job_id}/instrumental.wav",
         "model": result.model,
         "device": result.device,
         "source_origin": result.source_origin,
+        "stems": {stem_name: f"/files/{job_id}/{stem_name}.wav" for stem_name in result.stems.keys()},
     }
+    
+    # For backward compatibility with vocal-removal workflows:
+    # Always include vocals_url and instrumental_url if those stems exist
+    if "vocals" in result.stems:
+        response["vocals_url"] = f"/files/{job_id}/vocals.wav"
+    if "instrumental" in result.stems:
+        response["instrumental_url"] = f"/files/{job_id}/instrumental.wav"
+    
+    return response

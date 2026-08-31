@@ -189,9 +189,11 @@ class DemucsSeparationEngine(SeparationEngine):
         shutil.rmtree(demucs_root, ignore_errors=True)
 
         return SeparationResult(
-            vocals_path=final_vocals,
-            instrumental_path=final_instrumental,
             model=self._model,
             device=self._device,
             source_origin="",  # filled in by VocalRemovalService
+            stems={
+                "vocals": final_vocals,
+                "instrumental": final_instrumental,
+            },
         )

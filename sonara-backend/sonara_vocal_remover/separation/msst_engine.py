@@ -233,10 +233,21 @@ class MSSTSeparationEngine(SeparationEngine):
                     f"Expected MSST instrumental output not found under {output_dir}."
                 )
 
+        # Build stems dict from required and optional outputs
+        stems = {}
+        for stem_name in required_outputs:
+            stem_path = output_dir / f"{stem_name}.wav"
+            if stem_path.exists():
+                stems[stem_name] = stem_path
+        
+        for stem_name in optional_outputs:
+            stem_path = output_dir / f"{stem_name}.wav"
+            if stem_path.exists():
+                stems[stem_name] = stem_path
+
         return SeparationResult(
-            vocals_path=output_dir / "vocals.wav",
-            instrumental_path=output_dir / "instrumental.wav",
             model=self._definition.id,
             device=self._device,
             source_origin="",
+            stems=stems,
         )

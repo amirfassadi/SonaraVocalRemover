@@ -58,8 +58,15 @@ def main(argv=None) -> int:
         print(f"Error: {exc}", file=sys.stderr)
         return 1
 
-    print(f"Vocals stem saved to:       {result.vocals_path}")
-    print(f"Instrumental stem saved to: {result.instrumental_path}")
+    # Print results: support both legacy vocal/instrumental and arbitrary stems
+    if result.stems:
+        for stem_name, stem_path in sorted(result.stems.items()):
+            print(f"{stem_name.capitalize():20} stem saved to: {stem_path}")
+    else:
+        # Fallback for older/legacy results (shouldn't happen with current code)
+        print(f"Vocals stem saved to:       {result.vocals_path}")
+        print(f"Instrumental stem saved to: {result.instrumental_path}")
+    
     return 0
 
 

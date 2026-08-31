@@ -12,7 +12,7 @@ from pathlib import Path
 from typing import Optional
 
 from sonara_vocal_remover.config import DEFAULT_DEVICE, DEFAULT_MODEL
-from sonara_vocal_remover.errors import InvalidOutputPathError, SonaraError
+from sonara_vocal_remover.errors import InvalidOutputPathError, MissingModelError, SonaraError
 from sonara_vocal_remover.models import ModelRegistry
 from sonara_vocal_remover.separation.base import SeparationEngine
 from sonara_vocal_remover.separation.demucs_engine import DemucsSeparationEngine
@@ -38,20 +38,36 @@ class VocalRemovalService:
             self._engine = self._resolve_engine_for_model(model)
 
     def _resolve_engine_for_model(self, model: str) -> SeparationEngine:
-        if model == "htdemucs":
+        """
+        Resolve the appropriate separation engine for a given model.
+        
+        For the default model (htdemucs), use DemucsSeparationEngine directly.
+        For any other model, look it up in the registry and select the engine
+        based on the model's backend.name metadata.
+        
+        Unknown models raise MissingModelError (no fallback).
+        """
+        if model == DEFAULT_MODEL:
+            # Default model always uses Demucs
             return DemucsSeparationEngine(model=model, device=self._device)
 
+        # For non-default models, they must exist in the registry
         try:
             definition = self._registry.get(model)
-        except Exception:
-            return DemucsSeparationEngine(model=model, device=self._device)
+        except MissingModelError:
+            # Re-raise: unknown model is an error, not a fallback
+            raise
 
         backend_name = str((definition.backend or {}).get("name", "")).lower()
         if backend_name == "msst":
             return MSSTSeparationEngine(model_definition=definition, device=self._device)
-        if backend_name == "demucs":
+        elif backend_name == "demucs":
             return DemucsSeparationEngine(model=model, device=self._device)
-        return DemucsSeparationEngine(model=model, device=self._device)
+        else:
+            raise MissingModelError(
+                f"Model '{model}' has unknown backend '{backend_name}'. "
+                f"Supported backends: msst, demucs."
+            )
 
     def _resolve_engine(self, definition):
         backend_name = str((definition.backend or {}).get("name", "")).lower()
