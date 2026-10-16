@@ -1,9 +1,13 @@
 requests>=2.31
 
 # API layer (light)
-fastapi>=0.110
+fastapi>=0.115.2
+starlette>=0.40
 uvicorn[standard]>=0.29
 python-multipart>=0.0.9
 
 # Dev/test (light)
 pytest>=8.0
+
+PyYAML>=6.0
+httpx>=0.28

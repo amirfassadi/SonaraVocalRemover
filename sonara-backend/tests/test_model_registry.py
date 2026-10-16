@@ -187,7 +187,7 @@ def test_msst_engine_uses_model_definition_values(tmp_path, sample_model_yaml):
     assert command[:4] == [str(Path(sys.executable)), "-m", "msst", "inference"]
 
 
-def test_service_selects_engine_by_backend_type(tmp_path):
+def test_service_selects_engine_by_backend_type(tmp_path, monkeypatch):
     service = VocalRemovalService(model="htdemucs")
     assert service._engine.__class__.__name__ == "DemucsSeparationEngine"
 
@@ -208,6 +208,8 @@ def test_service_selects_engine_by_backend_type(tmp_path):
         status={"enabled": True},
         notes=[],
     )
+    registry._definitions[model_def.id] = model_def
+    monkeypatch.setattr("sonara_vocal_remover.service.ModelRegistry", lambda: registry)
     service_2 = VocalRemovalService(model=model_def.id)
     service_2._registry = registry
     service_2._engine = None

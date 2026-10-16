@@ -160,19 +160,6 @@ def test_model_registry_lists_enabled_models(tmp_path, monkeypatch):
     assert "disabled_model" not in enabled_ids
 
 
-def test_api_response_includes_stems_dict(tmp_path, monkeypatch):
-    """
-    API /separate endpoint should include stems dict in response.
-    
-    This is an integration test that validates the response structure
-    when a separation completes.
-    """
-    # This test would require mocking the separation engine
-    # and is more of an integration test. Skipping for now as it
-    # requires a full setup. Could be added to integration tests.
-    pass
-
-
 def test_model_definition_with_multiple_stems(tmp_path):
     """ModelDefinition should support models with multiple output stems."""
     from sonara_vocal_remover.models.definition import ModelDefinition

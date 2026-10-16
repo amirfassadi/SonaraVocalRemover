@@ -1,0 +1,12 @@
+id: melband_kim
+name: MelBand RoFormer Kim
+architecture: {type: mel_band_roformer}
+backend:
+  name: audio_separator
+  model_filename: vocals_mel_band_roformer.ckpt
+task: {category: vocal_separation}
+outputs: {required: [vocals, instrumental]}
+artifacts: {}
+status: {enabled: true, verified: false}
+runtime: {mdxc_params: {batch_size: 1}}
+notes: ["Candidate only; operator must prepare artifacts before it is selectable."]

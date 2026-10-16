@@ -1,0 +1,16 @@
+.env*
+.venv
+venv
+__pycache__
+.pytest_cache
+*.pyc
+*.sqlite*
+model_cache
+sonara-data
+output
+uploads
+tests
+*.ckpt
+*.pth
+*.pt
+*.onnx

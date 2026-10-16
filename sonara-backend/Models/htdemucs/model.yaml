@@ -1,0 +1,8 @@
+id: htdemucs
+name: HTDemucs (legacy CLI)
+architecture: {type: htdemucs}
+backend: {name: demucs}
+task: {category: vocal_separation}
+outputs: {required: [vocals, instrumental]}
+artifacts: {}
+status: {enabled: true}

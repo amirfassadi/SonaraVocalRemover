@@ -1,348 +1,144 @@
-import React, { useState, useEffect, useCallback } from 'react';
-import { Header } from './components/Header';
-import { InputSection } from './components/InputSection';
-import { SeparationControls, PipelineStage } from './components/SeparationControls';
-import { StemPlayer } from './components/StemPlayer';
-import { ArchitectureModal } from './components/ArchitectureModal';
-import { CodeGenerator } from './components/CodeGenerator';
-import { ConsoleLogs, LogEntry } from './components/ConsoleLogs';
-import {
-  HealthCheckResponse,
-  DemucsModel,
-  DeviceType,
-  SeparationResult,
-  getFriendlyErrorMessage,
-} from './types';
-import { HelpCircle, Terminal, Layers, Info } from 'lucide-react';
+import React, { useEffect, useRef, useState } from 'react';
+import { Mic2, UploadCloud, Music2, Download, ChevronDown, X, Check, LoaderCircle } from 'lucide-react';
+
+type Model = { id: string; name: string; revision: string };
+type Job = { job_id: string; filename: string; state: string; model_id: string; model_revision: string;
+  stems: Record<string,string>; error: string | null; cancel_requested: boolean; started_at: number | null;
+  finished_at: number | null; expires_at: number | null };
+const terminal = new Set(['succeeded', 'failed', 'cancelled', 'expired', 'deleted']);
+const messages: Record<string,string> = {
+  queue_full: 'صف پردازش پر است. کمی بعد دوباره امتحان کنید.',
+  service_not_ready: 'سرور هنوز برای پردازش آماده نیست.', model_not_ready: 'این مدل فعلاً آماده نیست.',
+  file_too_large: 'حجم فایل باید کمتر از ۲۰۰ مگابایت باشد.', empty_file: 'فایل انتخاب‌شده خالی است.',
+  unsupported_format: 'فرمت فایل پشتیبانی نمی‌شود.', upload_timeout: 'ارسال طول کشید. دوباره تلاش کنید.',
+  processing_timeout: 'پردازش بیش از زمان مجاز طول کشید.', worker_interrupted: 'پردازش متوقف شد. دوباره تلاش کنید.',
+  processing_failed: 'پردازش انجام نشد. فایل صوتی سالم و حداکثر ۱۰ دقیقه‌ای انتخاب کنید.',
+  job_not_found: 'این کار در این مرورگر در دسترس نیست.', server_unreachable: 'ارتباط با سرور برقرار نشد.',
+  storage_full: 'فضای پردازش سرور کافی نیست.', invalid_origin: 'نشانی سایت با تنظیمات سرور سازگار نیست.',
+};
+function friendly(code: string) { return messages[code] || 'مشکلی پیش آمد. دوباره تلاش کنید.'; }
+async function api(url: string, options?: RequestInit) {
+  const response = await fetch(url, options);
+  const data = await response.json();
+  if (!response.ok) throw new Error(data.error?.code || 'server_unreachable');
+  return data;
+}
 
 export const App: React.FC = () => {
-  // Service health state
-  const [health, setHealth] = useState<HealthCheckResponse | null>(null);
-  const [isCheckingHealth, setIsCheckingHealth] = useState<boolean>(true);
-
-  // Model & Device configuration
-  const [selectedModel, setSelectedModel] = useState<DemucsModel>('htdemucs');
-  const [selectedDevice, setSelectedDevice] = useState<DeviceType>('cpu');
-
-  // Processing pipeline state
-  const [stage, setStage] = useState<PipelineStage>('idle');
-  const [statusText, setStatusText] = useState<string>('');
-  const [errorDetail, setErrorDetail] = useState<{ type?: string; message?: string } | null>(null);
-  const [result, setResult] = useState<SeparationResult | null>(null);
-
-  // Logging & UI toggles
-  const [logs, setLogs] = useState<LogEntry[]>([]);
-  const [showArchitecture, setShowArchitecture] = useState<boolean>(false);
-  const [showLogs, setShowLogs] = useState<boolean>(true);
-
-  const addLog = useCallback((message: string, level: 'info' | 'warn' | 'error' | 'success' = 'info') => {
-    setLogs((prev) => [
-      ...prev,
-      {
-        id: Math.random().toString(36).substring(2, 9),
-        timestamp: new Date().toLocaleTimeString(),
-        message,
-        level,
-      },
-    ]);
-  }, []);
-
-  // Fetch backend health
-  const checkHealth = useCallback(async () => {
-    setIsCheckingHealth(true);
-    addLog('Checking separation backend health status...', 'info');
-
-    try {
-      const res = await fetch('/api/health');
-      const data: HealthCheckResponse = await res.json();
-      setHealth(data);
-
-      if (res.ok && data.connected) {
-        addLog(`Backend connected! Engine: ${data.engine || 'htdemucs'} (${data.backend_url})`, 'success');
-      } else {
-        const errorMsg = data.error?.message || `Backend returned status ${res.status}`;
-        addLog(`Backend issue: ${errorMsg}`, 'warn');
-      }
-    } catch (err: any) {
-      setHealth({
-        status: 'unreachable',
-        connected: false,
-        error: {
-          type: 'NetworkError',
-          message: "Can't reach the separation service right now. Please try again shortly.",
-        },
-      });
-      addLog("Can't reach the separation service right now. Please try again shortly.", 'error');
-    } finally {
-      setIsCheckingHealth(false);
-    }
-  }, [addLog]);
+  const [models, setModels] = useState<Model[]>([]);
+  const [model, setModel] = useState('');
+  const [ready, setReady] = useState(false);
+  const [file, setFile] = useState<File | null>(null);
+  const [job, setJob] = useState<Job | null>(null);
+  const [jobId, setJobId] = useState(() => localStorage.getItem('sonara-job') || '');
+  const [uploading, setUploading] = useState(false);
+  const [progress, setProgress] = useState(0);
+  const [error, setError] = useState('');
+  const [connectionLost, setConnectionLost] = useState(false);
+  const [actionBusy, setActionBusy] = useState(false);
+  const [now, setNow] = useState(Date.now());
+  const input = useRef<HTMLInputElement>(null);
+  const upload = useRef<XMLHttpRequest | null>(null);
+  const busy = uploading || (!!jobId && (!job || !terminal.has(job.state)));
 
   useEffect(() => {
-    checkHealth();
-  }, [checkHealth]);
+    let stopped = false;
+    const refresh = () => api('/api/models').then(data => {
+      if (stopped) return;
+      setModels(data.models); setReady(data.worker_ready && data.models.length > 0);
+      setModel(previous => data.models.some((m: Model) => m.id === previous) ? previous :
+        data.models.some((m: Model) => m.id === data.default_model) ? data.default_model : data.models[0]?.id || '');
+    }).catch(() => { if (!stopped) setReady(false); });
+    refresh(); const timer = setInterval(refresh, 10_000);
+    return () => { stopped = true; clearInterval(timer); };
+  }, []);
+  useEffect(() => {
+    if (!jobId) return;
+    let stopped = false;
+    let timer: ReturnType<typeof setTimeout>;
+    const poll = async () => {
+      try {
+        const data = await api(`/api/jobs/${jobId}`);
+        if (stopped) return;
+        setJob(data); setConnectionLost(false);
+        if (data.state === 'failed') setError(friendly(data.error));
+        // Keep checking successful jobs so expiration is reflected in an open tab.
+        if (!['failed','cancelled','expired','deleted'].includes(data.state)) timer = setTimeout(poll, data.state === 'succeeded' ? 60_000 : 2000);
+      } catch (e) {
+        if (stopped) return;
+        if ((e as Error).message === 'job_not_found') {
+          setError(friendly('job_not_found')); localStorage.removeItem('sonara-job'); setJobId('');
+        } else { setConnectionLost(true); timer = setTimeout(poll, 5000); }
+      }
+    };
+    poll(); return () => { stopped = true; clearTimeout(timer); };
+  }, [jobId]);
+  useEffect(() => { const timer = setInterval(() => setNow(Date.now()), 1000); return () => clearInterval(timer); }, []);
+  useEffect(() => () => upload.current?.abort(), []);
 
-  // Handle file separation
-  const handleSeparateFile = async (file: File) => {
-    setResult(null);
-    setErrorDetail(null);
-    setStage('validating');
-    setStatusText('Validating local file syntax and size limit (200MB max)...');
-    addLog(`Initiating separation pipeline for local file: ${file.name} (${(file.size / (1024 * 1024)).toFixed(2)} MB)`, 'info');
-
+  function select(next?: File) {
+    if (!next || busy) return;
+    setError('');
+    if (!/\.(wav|mp3|flac|m4a|ogg)$/i.test(next.name)) { setError(friendly('unsupported_format')); return; }
+    if (!next.size || next.size > 200 * 1024 * 1024) { setError(friendly(next.size ? 'file_too_large' : 'empty_file')); return; }
+    setFile(next);
+  }
+  function submit() {
+    if (!file || !ready || busy) return;
+    setError(''); setJob(null); setJobId(''); localStorage.removeItem('sonara-job');
+    setUploading(true); setProgress(0);
+    const xhr = new XMLHttpRequest(); upload.current = xhr;
+    xhr.open('POST', `/api/jobs?filename=${encodeURIComponent(file.name)}&model_id=${encodeURIComponent(model)}`);
+    xhr.setRequestHeader('Content-Type','application/octet-stream'); xhr.timeout = 600_000;
+    xhr.upload.onprogress = event => { if (event.lengthComputable) setProgress(Math.round(event.loaded / event.total * 100)); };
+    xhr.onload = () => {
+      try {
+        const data = JSON.parse(xhr.responseText);
+        if (xhr.status !== 202) { setError(friendly(data.error?.code)); return; }
+        setJob(data); localStorage.setItem('sonara-job',data.job_id); setJobId(data.job_id);
+      } catch { setError(friendly('server_unreachable')); }
+      finally { setUploading(false); }
+    };
+    xhr.onerror = () => { setUploading(false); setError(friendly('server_unreachable')); };
+    xhr.ontimeout = () => { setUploading(false); setError(friendly('upload_timeout')); };
+    xhr.onabort = () => setUploading(false);
+    xhr.send(file);
+  }
+  async function action(remove = false) {
+    if (!job || actionBusy) return;
+    setActionBusy(true);
     try {
-      // Stage 2: Uploading
-      setStage('uploading');
-      setStatusText('Streaming audio buffer to Python separation service...');
-      addLog('Uploading audio payload via Express multipart proxy...', 'info');
-
-      const formData = new FormData();
-      formData.append('file', file);
-      formData.append('model', selectedModel);
-      formData.append('device', selectedDevice);
-
-      // Stage 3: Separation Processing
-      setStage('processing');
-      setStatusText(`Demucs AI separating vocals & instrumental stems using model '${selectedModel}' on ${selectedDevice.toUpperCase()}...`);
-      addLog(`Posting to /api/separate [Model: ${selectedModel}, Device: ${selectedDevice}]`, 'info');
-
-      const response = await fetch('/api/separate', {
-        method: 'POST',
-        body: formData,
-      });
-
-      const data = await response.json();
-
-      if (!response.ok) {
-        const errType = data.error?.type || 'ProcessingFailureError';
-        const rawMsg = data.error?.message || 'Failed to separate audio track.';
-        const friendlyMsg = getFriendlyErrorMessage(errType, rawMsg);
-
-        setErrorDetail({ type: errType, message: `${friendlyMsg} (${rawMsg})` });
-        setStage('error');
-        setStatusText(friendlyMsg);
-        addLog(`Separation Error [${errType}]: ${rawMsg}`, 'error');
-        return;
-      }
-
-      // Success
-      setResult({
-        jobId: data.job_id,
-        vocalsUrl: data.vocals_url,
-        instrumentalUrl: data.instrumental_url,
-        model: data.model,
-        device: data.device,
-        filename: file.name,
-      });
-
-      setStage('completed');
-      setStatusText('Separation complete! Downloadable stems generated.');
-      addLog(`Separation completed successfully for job ${data.job_id}`, 'success');
-    } catch (err: any) {
-      const friendlyMsg = getFriendlyErrorMessage('NetworkError');
-      setErrorDetail({ type: 'NetworkError', message: friendlyMsg });
-      setStage('error');
-      setStatusText(friendlyMsg);
-      addLog(`Network Failure: ${err.message || friendlyMsg}`, 'error');
-    }
-  };
-
-  // Handle URL separation
-  const handleSeparateUrl = async (url: string) => {
-    setResult(null);
-    setErrorDetail(null);
-    setStage('validating');
-    setStatusText('Validating direct audio URL and SSRF security policies...');
-    addLog(`Initiating URL validation for: ${url}`, 'info');
-
-    try {
-      // Step 1: Validate URL
-      const valRes = await fetch('/api/validate-url', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ url }),
-      });
-
-      const valData = await valRes.json();
-
-      if (!valRes.ok || !valData.valid) {
-        const errType = valData.error?.type || (valData.isPlatformUrl ? 'BlockedUrlError' : 'InvalidUrlError');
-        const rawMsg = valData.error?.message || valData.message || "That doesn't look like a valid URL.";
-        const friendlyMsg = getFriendlyErrorMessage(errType, rawMsg);
-
-        setErrorDetail({ type: errType, message: `${friendlyMsg} (${rawMsg})` });
-        setStage('error');
-        setStatusText(friendlyMsg);
-        addLog(`URL Validation Failed [${errType}]: ${rawMsg}`, 'error');
-        return;
-      }
-
-      addLog('URL passed security validation. Requesting backend download & separation...', 'success');
-
-      // Step 2: Request separation
-      setStage('uploading');
-      setStatusText('Backend is downloading audio from URL...');
-
-      setStage('processing');
-      setStatusText(`Demucs AI separating track using '${selectedModel}' on ${selectedDevice.toUpperCase()}...`);
-
-      const formData = new FormData();
-      formData.append('url', url);
-      formData.append('model', selectedModel);
-      formData.append('device', selectedDevice);
-
-      const response = await fetch('/api/separate', {
-        method: 'POST',
-        body: formData,
-      });
-
-      const data = await response.json();
-
-      if (!response.ok) {
-        const errType = data.error?.type || 'ProcessingFailureError';
-        const rawMsg = data.error?.message || 'Failed to separate audio from URL.';
-        const friendlyMsg = getFriendlyErrorMessage(errType, rawMsg);
-
-        setErrorDetail({ type: errType, message: `${friendlyMsg} (${rawMsg})` });
-        setStage('error');
-        setStatusText(friendlyMsg);
-        addLog(`URL Separation Error [${errType}]: ${rawMsg}`, 'error');
-        return;
-      }
-
-      // Success
-      const filenameFromUrl = url.substring(url.lastIndexOf('/') + 1) || 'url_audio_track';
-      setResult({
-        jobId: data.job_id,
-        vocalsUrl: data.vocals_url,
-        instrumentalUrl: data.instrumental_url,
-        model: data.model,
-        device: data.device,
-        filename: filenameFromUrl,
-      });
-
-      setStage('completed');
-      setStatusText('Separation complete! Downloadable stems generated.');
-      addLog(`URL separation completed for job ${data.job_id}`, 'success');
-    } catch (err: any) {
-      const friendlyMsg = getFriendlyErrorMessage('NetworkError');
-      setErrorDetail({ type: 'NetworkError', message: friendlyMsg });
-      setStage('error');
-      setStatusText(friendlyMsg);
-      addLog(`Network Failure: ${err.message || friendlyMsg}`, 'error');
-    }
-  };
-
-  const handleReset = () => {
-    setStage('idle');
-    setStatusText('');
-    setErrorDetail(null);
-    setResult(null);
-  };
-
-  return (
-    <div className="min-h-screen bg-slate-950 text-slate-100 flex flex-col font-sans selection:bg-indigo-500 selection:text-white">
-      
-      {/* Header */}
-      <Header
-        health={health}
-        isCheckingHealth={isCheckingHealth}
-        onRefreshHealth={checkHealth}
-        selectedModel={selectedModel}
-        onModelChange={setSelectedModel}
-        selectedDevice={selectedDevice}
-        onDeviceChange={setSelectedDevice}
-      />
-
-      {/* Main Container */}
-      <main className="flex-1 max-w-6xl w-full mx-auto px-4 sm:px-6 py-8 space-y-8">
-        
-        {/* Intro Banner */}
-        <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 bg-gradient-to-r from-slate-900 via-slate-900/90 to-indigo-950/40 p-6 rounded-2xl border border-slate-800 shadow-xl">
-          <div className="space-y-1">
-            <div className="inline-flex items-center space-x-2 bg-indigo-500/10 border border-indigo-500/20 text-indigo-300 px-2.5 py-1 rounded-full text-xs font-semibold">
-              <Info className="w-3.5 h-3.5" />
-              <span>Demucs v4 Audio Engine</span>
-            </div>
-            <h2 className="text-xl font-extrabold text-slate-100 tracking-tight">
-              Separate Vocals & Instrumental Stems
-            </h2>
-            <p className="text-xs text-slate-400 max-w-2xl leading-relaxed">
-              Upload a song or paste a direct audio URL to produce stereo <span className="text-slate-200 font-mono font-medium">vocals.wav</span> and <span className="text-slate-200 font-mono font-medium">instrumental.wav</span> stems powered by the Python Demucs separation backend.
-            </p>
-          </div>
-
-          <div className="flex items-center space-x-3 shrink-0">
-            <button
-              onClick={() => setShowArchitecture(true)}
-              className="flex items-center space-x-1.5 px-3.5 py-2 rounded-xl bg-slate-900 border border-slate-800 hover:border-slate-700 text-slate-300 text-xs font-medium transition-all"
-            >
-              <Layers className="w-4 h-4 text-indigo-400" />
-              <span>Architecture</span>
-            </button>
-          </div>
-        </div>
-
-        {/* Input Section */}
-        <InputSection
-          isDisabled={stage !== 'idle' && stage !== 'completed' && stage !== 'error'}
-          isBackendConnected={health?.connected ?? false}
-          onSeparateFile={handleSeparateFile}
-          onSeparateUrl={handleSeparateUrl}
-          selectedModel={selectedModel}
-          onModelChange={setSelectedModel}
-          selectedDevice={selectedDevice}
-          onDeviceChange={setSelectedDevice}
-        />
-
-        {/* Pipeline Progress Indicator */}
-        <SeparationControls
-          stage={stage}
-          statusText={statusText}
-          errorDetail={errorDetail}
-          onReset={handleReset}
-        />
-
-        {/* Stem Audio Player (When Complete) */}
-        {result && <StemPlayer result={result} />}
-
-        {/* Developer Integration Code Generator */}
-        <CodeGenerator />
-
-        {/* Live Execution Logs */}
-        <div className="space-y-2">
-          <div className="flex items-center justify-between">
-            <button
-              onClick={() => setShowLogs(!showLogs)}
-              className="flex items-center space-x-2 text-xs font-semibold text-slate-400 hover:text-slate-200"
-            >
-              <Terminal className="w-4 h-4 text-indigo-400" />
-              <span>Backend Execution Console ({logs.length} events)</span>
-            </button>
-          </div>
-
-          {showLogs && <ConsoleLogs logs={logs} onClear={() => setLogs([])} />}
-        </div>
-
-      </main>
-
-      {/* Architecture Modal */}
-      {showArchitecture && (
-        <ArchitectureModal
-          onClose={() => setShowArchitecture(false)}
-          backendUrl={health?.backend_url || 'http://localhost:8000'}
-        />
-      )}
-
-      {/* Footer */}
-      <footer className="border-t border-slate-900 bg-slate-950 py-6 mt-12">
-        <div className="max-w-6xl mx-auto px-4 text-center text-xs text-slate-500">
-          Sonara Vocal Remover Engine • Demucs htdemucs • Powered by FastAPI & React
-        </div>
-      </footer>
-
-    </div>
-  );
+      await api(`/api/jobs/${job.job_id}${remove ? '' : '/cancel'}`, {method: remove ? 'DELETE' : 'POST'});
+      if (remove) { setJob(null); setJobId(''); localStorage.removeItem('sonara-job'); }
+      else setJob(await api(`/api/jobs/${job.job_id}`));
+    } catch (e) { setError(friendly((e as Error).message)); }
+    finally { setActionBusy(false); }
+  }
+  const elapsed = job?.started_at ? Math.max(0, Math.floor(((job.finished_at || now / 1000) - job.started_at))) : 0;
+  return <div className="karaoke-app" dir="rtl">
+    <header className="topbar"><a href="/" className="brand"><span className="brand-icon"><Mic2 size={22}/></span><span>Sonara<span className="brand-sub">KARAOKE STUDIO</span></span></a><span className={`server-pill ${ready ? 'online' : ''}`}><i/>{ready ? 'آمادهٔ پردازش' : 'در انتظار آماده‌شدن سرور'}</span></header>
+    <main>
+      <section className="intro"><span className="eyebrow">صدای بعدی، صدای توست</span><h1>آهنگت را آماده کن.<br/><span>نوبت خواندن توست.</span></h1><p>آهنگ را از گوشی بفرست؛ موسیقی بدون آواز را بگیر و تمرین کن.</p></section>
+      <section className="studio" aria-label="آماده‌سازی کارائوکه">
+        <div className="section-label"><span>۰۱</span> آهنگت را انتخاب کن</div>
+        <button className="dropzone" disabled={busy} onClick={() => input.current?.click()} onDragOver={e => e.preventDefault()} onDrop={e => {e.preventDefault(); select(e.dataTransfer.files[0]);}}>
+          <span className="upload-icon">{file ? <Music2 size={28}/> : <UploadCloud size={28}/>}</span>
+          <strong>{file ? file.name : 'انتخاب آهنگ از گوشی'}</strong><span>{file ? `${(file.size / 1024 / 1024).toFixed(1)} MB · برای تغییر لمس کن` : 'یا فایل را اینجا رها کن'}</span>
+          <small dir="ltr">MP3 · WAV · FLAC · M4A · OGG</small>
+        </button><input ref={input} type="file" accept=".mp3,.wav,.flac,.m4a,.ogg" hidden onChange={e => select(e.target.files?.[0])}/>
+        <p className="limits">حداکثر ۱۰ دقیقه و ۲۰۰ مگابایت · پردازش روی سرور انجام می‌شود</p>
+        <details className="advanced"><summary>تنظیمات مدل <ChevronDown size={16}/></summary><label htmlFor="model">مدل جداسازی</label><select id="model" value={model} disabled={busy} onChange={e => setModel(e.target.value)}>{!models.length && <option value="">هنوز مدلی آماده نیست</option>}{models.map(m => <option key={m.id} value={m.id}>{m.name}</option>)}</select><p>فقط مدل‌های آمادهٔ سرور نمایش داده می‌شوند.</p></details>
+        <button className="primary" onClick={submit} disabled={!file || !ready || busy}><Mic2 size={19}/>{uploading ? 'در حال ارسال آهنگ…' : busy ? 'آهنگ در حال آماده‌شدن است' : 'آماده‌کردن برای کارائوکه'}</button>
+        {uploading && <div className="progress-area" aria-live="polite"><progress value={progress} max={100}/><span>ارسال {progress}٪ {progress === 100 && '· در انتظار ثبت کار'}</span><button className="text-button" onClick={() => upload.current?.abort()}>لغو ارسال</button></div>}
+        {error && <p className="error" role="alert">{error}</p>}
+        {connectionLost && <p className="notice" role="status">ارتباط قطع شده؛ دوباره وضعیت کار را بررسی می‌کنیم. آهنگ را مجدد ارسال نکن.</p>}
+        {job && !terminal.has(job.state) && <div className="job-status" aria-live="polite"><LoaderCircle className="spin"/><div><strong>{job.cancel_requested ? 'در حال لغو…' : job.state === 'queued' ? 'آهنگت در صف است' : 'در حال جداکردن آواز'}</strong><p>{job.state === 'queued' ? 'به‌محض آزادشدن سرور شروع می‌شود.' : `${elapsed} ثانیه گذشته · زمان به آهنگ و سرور بستگی دارد.`}</p><small>می‌توانی صفحه را ببندی و در همین مرورگر برگردی.</small></div><button className="icon-button" aria-label="لغو پردازش" disabled={actionBusy || job.cancel_requested} onClick={() => action()}><X size={20}/></button></div>}
+        {job && ['cancelled','expired','deleted'].includes(job.state) && <p className="notice">{job.state === 'cancelled' ? 'پردازش لغو شد.' : 'فایل‌های این کار دیگر در دسترس نیستند.'}</p>}
+      </section>
+      {job?.state === 'succeeded' && <section className="results"><div className="result-heading"><span className="success-icon"><Check/></span><div><h2>موسیقی آماده است</h2><p>{job.filename}</p></div></div><div className="stem-card"><span className="eyebrow">وقت تمرین است</span><h3>موسیقی بدون آواز</h3><audio key={job.job_id+'music'} controls preload="metadata" src={job.stems.instrumental}/><a className="download" href={job.stems.instrumental} download="instrumental.wav"><Download size={18}/> دانلود موسیقی</a></div><details className="vocal-details"><summary>شنیدن و دانلود آواز جداشده</summary><audio controls preload="none" src={job.stems.vocals}/><a className="download secondary" href={job.stems.vocals} download="vocals.wav">دانلود آواز</a></details><div className="result-footer"><a href={`/api/jobs/${job.job_id}/download`}>دانلود هر دو فایل ZIP</a><button className="text-button" disabled={actionBusy} onClick={() => action(true)}>حذف فایل‌ها</button></div><p className="limits">خروجی‌ها ۲۴ ساعت نگهداری می‌شوند · {elapsed} ثانیه پردازش</p></section>}
+      <footer>Sonara · فضایی برای تمرین صدای تو</footer>
+    </main>
+  </div>;
 };
 
 export default App;

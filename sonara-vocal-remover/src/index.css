@@ -1,1 +1,75 @@
 @import "tailwindcss";
+:root{font-family:Tahoma,Arial,sans-serif;color:#e9edf6;background:#0b111c;font-synthesis:none;color-scheme:dark}
+*{box-sizing:border-box}
+body{margin:0}
+button,a,input,select{touch-action:manipulation}
+button,a,select{outline-offset:5px}
+button{cursor:pointer;font:inherit}
+button:disabled{cursor:not-allowed;opacity:.5}
+a{color:inherit;text-decoration:none}
+.karaoke-app{min-height:100vh;background:radial-gradient(ellipse at 20% 0%,#162f3b88,transparent 55%)}
+.topbar{max-width:1040px;margin:auto;display:flex;align-items:center;justify-content:space-between;padding:28px 24px;border-bottom:1px solid #25303d}
+.brand{display:flex;gap:10px;align-items:center;direction:ltr;font-family:Arial;font-size:25px;font-weight:700}
+.brand-icon{background:#83dfbf;color:#10231f;padding:9px;border-radius:12px}
+.brand-sub{display:block;font-size:8px;letter-spacing:2px;color:#8d9aa9;margin-top:3px}
+.server-pill{display:flex;gap:7px;align-items:center;font-size:11px;color:#9aa8b8}
+.server-pill i{width:6px;height:6px;border-radius:50%;background:#d4ab66}
+.server-pill.online i{background:#83dfbf}
+main{max-width:650px;margin:auto;padding:0 20px}
+.intro{padding:52px 0 32px;text-align:center}
+.eyebrow{font-size:11px;color:#83dfbf;letter-spacing:.5px}
+h1{font-size:clamp(28px,5.5vw,44px);font-weight:700;line-height:1.65;margin:13px 0}
+h1 span{color:#83dfbf}
+.intro p{font-size:13px;color:#a5b0c0;line-height:2}
+.studio,.results{background:#131d2b;border:1px solid #293647;border-radius:22px;padding:27px;box-shadow:0 15px 45px #0002}
+.section-label{font-size:13px;margin-bottom:19px;display:flex;gap:10px;align-items:center}
+.section-label span{font-size:10px;border:1px solid #3c4b5f;border-radius:50%;padding:4px 7px;color:#99a9bb}
+.dropzone{width:100%;border:1px dashed #4a6174;background:#192737;border-radius:15px;display:flex;align-items:center;flex-direction:column;padding:26px 14px;gap:10px}
+.dropzone:hover:not(:disabled){background:#203343;border-color:#83dfbf}
+.upload-icon{border-radius:14px;padding:12px;background:#83dfbf12;color:#83dfbf}
+.dropzone strong{font-size:15px;max-width:100%;overflow-wrap:anywhere}
+.dropzone span:not(.upload-icon){font-size:11px;color:#a1afc1}
+.dropzone small{font-size:9px;color:#74879d;margin-top:8px;letter-spacing:1px}
+.limits{font-size:10px;line-height:1.9;color:#8a9ab0;margin:13px 0}
+.advanced{margin:22px 0 18px;font-size:12px}
+.advanced summary{display:flex;justify-content:space-between;color:#acb8c8;cursor:pointer}
+.advanced label{display:block;margin:17px 0 8px}
+select{padding:12px;border-radius:8px;width:100%;background:#0f1927;border:1px solid #415268;font-size:13px}
+.advanced p{font-size:10px;color:#8999af}
+.primary{width:100%;border:0;background:#83dfbf;border-radius:11px;padding:16px;color:#132d25;font-weight:bold;display:flex;align-items:center;justify-content:center;gap:10px;font-size:14px}
+.progress-area{margin-top:18px;display:flex;gap:9px;align-items:center;flex-wrap:wrap;font-size:11px}
+progress{width:100%;height:7px;accent-color:#83dfbf}
+.text-button{background:none;border:0;color:#b4c2d4;font-size:11px;padding:10px}
+.error,.notice{font-size:12px;line-height:2;padding:13px;border-radius:9px;margin-top:16px}
+.error{background:#512a3544;color:#ffb7c1}
+.notice{background:#2b3b4d;color:#cbd6e5}
+.job-status{display:flex;gap:12px;align-items:center;border-top:1px solid #314055;padding-top:20px;margin-top:20px;font-size:12px}
+.job-status strong{font-size:13px}
+.job-status p{font-size:11px;color:#adbacb;line-height:1.8}
+.job-status small{font-size:10px;color:#8c9caf}
+.icon-button{border:0;background:none;color:#a8b6c7;margin-right:auto;min-height:44px;min-width:44px}
+.spin{animation:spin 2s linear infinite;color:#83dfbf;flex-shrink:0}
+@keyframes spin{to{transform:rotate(360deg)}
+}
+.results{margin-top:22px}
+.result-heading{display:flex;gap:12px;align-items:center}
+.success-icon{padding:9px;border-radius:50%;background:#83dfbf22;color:#83dfbf}
+h2{font-size:18px;margin:0}
+.result-heading p{font-size:11px;color:#9fadc0;overflow-wrap:anywhere}
+.stem-card{margin-top:22px;background:#1e3040;border-radius:13px;padding:20px}
+h3{font-size:17px;margin:9px 0 18px}
+audio{width:100%;height:42px;direction:ltr}
+.download{margin-top:16px;display:flex;align-items:center;justify-content:center;gap:8px;padding:13px;border:1px solid #83dfbf66;color:#a0e9cf;border-radius:8px;font-size:12px}
+.vocal-details{margin-top:22px;font-size:12px}
+.vocal-details summary{cursor:pointer;padding:9px 0 14px}
+.result-footer{display:flex;align-items:center;justify-content:space-between;margin-top:22px;font-size:11px;color:#b5c3d5}
+footer{font-size:10px;color:#62748b;text-align:center;padding:32px 0 40px}
+@media(max-width:480px){.topbar{padding:18px 20px}
+.server-pill{font-size:9px}
+.brand{font-size:21px}
+.intro{padding-top:32px}
+.studio,.results{padding:20px;border-radius:17px}
+.limits{font-size:9px}
+}
+@media(prefers-reduced-motion:reduce){.spin{animation:none}
+}

@@ -1,0 +1,6 @@
+-r requirements-light.txt
+# Install the platform-appropriate torch wheel first (CPU or CUDA).
+audio-separator[cpu]==0.47.0
+
+# Imported by audio-separator, no longer pulled transitively by librosa 1.x.
+audioread>=3.0

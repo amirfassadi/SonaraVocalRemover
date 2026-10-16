@@ -1,0 +1,80 @@
+name: checks
+on: [push, pull_request]
+jobs:
+  backend:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - run: sudo apt-get update && sudo apt-get install -y ffmpeg
+      - run: pip install -r sonara-backend/requirements-light.txt
+      - run: python -m pytest -q sonara-backend/tests
+  frontend:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: sonara-vocal-remover
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+          cache-dependency-path: sonara-vocal-remover/package-lock.json
+      - run: npm ci
+      - run: npm run lint
+      - run: npm run build
+      - run: npm run test:proxy
+  images:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - image: api
+            context: sonara-backend
+            dockerfile: sonara-backend/Dockerfile
+          - image: worker
+            context: sonara-backend
+            dockerfile: sonara-backend/Dockerfile.worker
+          - image: web
+            context: sonara-vocal-remover
+            dockerfile: sonara-vocal-remover/Dockerfile
+    steps:
+      - uses: actions/checkout@v4
+      - run: docker build -t sonara-${{ matrix.image }}:check -f ${{ matrix.dockerfile }} ${{ matrix.context }}
+      - if: matrix.image == 'api'
+        run: docker run --rm sonara-api:check python -c 'from api.main import app; print(app.version)'
+      - if: matrix.image == 'worker'
+        run: docker run --rm sonara-worker:check python -c 'from audio_separator.separator import Separator; import torch; print(torch.__version__)'
+      - if: matrix.image == 'web'
+        run: |
+          docker run -d --name sonara-web-check -p 127.0.0.1:3000:3000 -e SONARA_API_TOKEN=ci-api-token-00000000000000000000 -e SONARA_SESSION_SECRET=ci-session-secret-0000000000000000 -e SONARA_PASSWORD=ci-password-0000 sonara-web:check
+          python - <<'PYTHON'
+          import time, urllib.request, urllib.error
+          for attempt in range(30):
+              try:
+                  urllib.request.urlopen('http://127.0.0.1:3000', timeout=2)
+              except urllib.error.HTTPError as exc:
+                  if exc.code == 401:
+                      break
+                  raise
+              except OSError:
+                  time.sleep(1)
+              else:
+                  raise SystemExit('Private web route was not protected')
+          else:
+              raise SystemExit('Web container failed to start')
+          PYTHON
+      - if: failure() && matrix.image == 'web'
+        run: docker logs sonara-web-check
+  deployment-config:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - run: python3 tools/init_deploy.py --origin https://karaoke.example.com --output /tmp/sonara-check.env
+      - run: docker compose --env-file /tmp/sonara-check.env config --quiet
+      - run: docker compose --env-file /tmp/sonara-check.env -f compose.yaml -f compose.gpu.yaml config --quiet

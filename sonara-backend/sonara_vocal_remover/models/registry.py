@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import os
 from pathlib import Path
 from typing import Iterable
 
@@ -12,7 +13,7 @@ from sonara_vocal_remover.models.definition import ModelDefinition
 class ModelRegistry:
     def __init__(self, models_dir: str | Path | None = None):
         backend_root = Path(__file__).resolve().parents[2]
-        self._models_dir = Path(models_dir) if models_dir is not None else backend_root / "Models"
+        self._models_dir = Path(models_dir) if models_dir is not None else Path(os.environ.get("SONARA_MODELS_DIR", str(backend_root / "Models")))
         self._definitions: dict[str, ModelDefinition] = {}
         self._load()
 
