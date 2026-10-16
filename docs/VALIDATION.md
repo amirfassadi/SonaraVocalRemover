@@ -28,3 +28,12 @@ The opt-in `tests/test_real_jobs.py` preserves the equivalent scenario for repea
 Browser screenshot automation could not start because the available Chromium download returned an invalid archive. Real phone/browser visual and audio checks remain outstanding. The production build passing does not establish mobile acceptance.
 
 No deployment, real-song listening evaluation, GPU run, production load test, or full MVP acceptance has been performed. See KARAOKE_MVP.md for remaining acceptance items.
+
+## Server packaging follow-up
+
+- Added non-root API/worker/web images, CPU Compose and an NVIDIA override, shared persistent volumes, private credential initialization, health checks and HTTPS proxy guidance.
+- CPU and merged GPU configurations passed Docker Compose v2.39.4 `config --quiet` locally. This checks configuration, not runtime GPU availability.
+- Fresh light Python environment: 56 passed, 2 optional model integrations skipped; TypeScript, production build and proxy integration passed.
+- Added benchmark tests for timing/RTF calculation and cleanup, plus tests for private configuration creation and read-only worker health.
+- CI now builds all three CPU images, checks runtime imports/password gating and validates both Compose configurations. Local Docker Engine is unavailable; actual image-build results are recorded in GitHub Actions.
+- The target server, HTTPS routing, GPU processing and full-song benchmark remain untested.

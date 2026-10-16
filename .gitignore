@@ -143,3 +143,5 @@ sonara-data/
 *.sqlite*
 !sonara-backend/sonara_vocal_remover/jobs/
 !sonara-backend/sonara_vocal_remover/jobs/*.py
+
+benchmark-reports/

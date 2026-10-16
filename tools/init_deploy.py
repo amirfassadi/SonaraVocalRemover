@@ -1,0 +1,40 @@
+"""Create private deployment configuration without overwriting existing credentials."""
+import argparse
+import os
+import secrets
+from pathlib import Path
+from urllib.parse import urlsplit
+
+
+def initialize(destination, origin):
+    url = urlsplit(origin)
+    if (url.scheme != 'https' or not url.hostname or url.username or url.password
+            or url.path not in ('', '/') or url.query or url.fragment
+            or any(c.isspace() for c in origin) or any(c in origin for c in '\n\r#$')):
+        raise ValueError('Use an HTTPS origin, for example https://karaoke.example.com, without a path.')
+    destination = Path(destination)
+    destination.parent.mkdir(parents=True, exist_ok=True)
+    content = (f'PUBLIC_ORIGIN={origin.rstrip("/")}\n'
+               f'SONARA_API_TOKEN={secrets.token_hex(32)}\n'
+               f'SONARA_SESSION_SECRET={secrets.token_hex(32)}\n'
+               f'SONARA_PASSWORD={secrets.token_hex(16)}\n'
+               'SONARA_DEFAULT_MODEL=bs_roformer_viperx\nSONARA_DEVICE=cpu\n'
+               'TORCH_INDEX_URL=https://download.pytorch.org/whl/cpu\n'
+               'SONARA_CPU_THREADS=2\nSONARA_JOB_TIMEOUT=600\nSONARA_PORT=3000\n')
+    with os.fdopen(os.open(destination, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600), 'w') as output:
+        output.write(content)
+
+
+def main():
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument('--origin', required=True)
+    parser.add_argument('--output', type=Path, default=Path('deploy/.env'))
+    args = parser.parse_args()
+    try:
+        initialize(args.output, args.origin)
+    except (ValueError, FileExistsError) as exc:
+        parser.error(str(exc))
+    print(f'Created {args.output}. Browser username: sonara. Password is in that file.')
+
+if __name__ == '__main__':
+    main()

@@ -8,6 +8,10 @@ The browser sends file bytes once, then polls status. No inference runs inside t
 
 One worker per data directory is enforced by an OS lock. A long-lived subprocess keeps the model loaded for subsequent jobs. Changing model replaces the cached engine. Cancellation and timeout kill the subprocess group and release its memory. The next job reloads the model. Interrupted active jobs fail explicitly on restart; queued jobs remain queued. SQLite is for one host, not distributed/NFS deployment.
 
+## Container deployment
+
+[Deploy guide](../deploy/README.md) includes CPU/GPU Compose configurations, private environment generation, model preparation, HTTPS proxy settings and a repeatable benchmark against the phone-facing API.
+
 ## Local setup
 
 Use Linux, Python 3.12+, Node 22+, FFmpeg and a C/C++ build toolchain (for diffq). The commands below run from the repository root unless indicated.

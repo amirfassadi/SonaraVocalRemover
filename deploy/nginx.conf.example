@@ -1,0 +1,14 @@
+# Include inside an existing TLS-enabled server block for PUBLIC_ORIGIN.
+# Certificate paths and server_name belong to your host configuration.
+location / {
+    client_max_body_size 200m;
+    client_body_timeout 600s;
+    proxy_pass http://127.0.0.1:3000;
+    proxy_http_version 1.1;
+    proxy_set_header Host $host;
+    proxy_set_header X-Forwarded-Proto $scheme;
+    proxy_request_buffering off;
+    proxy_buffering off;
+    proxy_read_timeout 660s;
+    proxy_send_timeout 660s;
+}

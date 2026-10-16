@@ -1,0 +1,73 @@
+name: sonara-karaoke
+x-runtime: &runtime
+  SONARA_DATA_DIR: /data/jobs
+  SONARA_MODEL_CACHE: /data/models
+  SONARA_DEFAULT_MODEL: ${SONARA_DEFAULT_MODEL:-bs_roformer_viperx}
+  SONARA_DEVICE: ${SONARA_DEVICE:-cpu}
+  SONARA_JOB_TIMEOUT: ${SONARA_JOB_TIMEOUT:-600}
+services:
+  api:
+    build: ./sonara-backend
+    restart: unless-stopped
+    init: true
+    environment:
+      <<: *runtime
+      SONARA_API_TOKEN: ${SONARA_API_TOKEN:?Generate deploy/.env first}
+    volumes:
+      - jobs:/data/jobs
+      - models:/data/models:ro
+    healthcheck:
+      test: [CMD, python, -m, sonara_vocal_remover.jobs.healthcheck, api]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+      start_period: 20s
+  worker:
+    image: sonara-karaoke-worker:local
+    build:
+      context: ./sonara-backend
+      dockerfile: Dockerfile.worker
+      args:
+        TORCH_INDEX_URL: ${TORCH_INDEX_URL:-https://download.pytorch.org/whl/cpu}
+    restart: unless-stopped
+    init: true
+    stop_grace_period: 20s
+    environment:
+      <<: *runtime
+      OMP_NUM_THREADS: ${SONARA_CPU_THREADS:-2}
+      MKL_NUM_THREADS: ${SONARA_CPU_THREADS:-2}
+    volumes:
+      - jobs:/data/jobs
+      - models:/data/models
+    healthcheck:
+      test: [CMD, python, -m, sonara_vocal_remover.jobs.healthcheck, worker]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+      start_period: 20s
+  web:
+    build: ./sonara-vocal-remover
+    restart: unless-stopped
+    init: true
+    environment:
+      NODE_ENV: production
+      HOST: 0.0.0.0
+      PORT: '3000'
+      SEPARATION_API_URL: http://api:8000
+      SONARA_API_TOKEN: ${SONARA_API_TOKEN:?Generate deploy/.env first}
+      SONARA_SESSION_SECRET: ${SONARA_SESSION_SECRET:?Generate deploy/.env first}
+      SONARA_PASSWORD: ${SONARA_PASSWORD:?Generate deploy/.env first}
+      PUBLIC_ORIGIN: ${PUBLIC_ORIGIN:?Set the exact HTTPS origin}
+    ports:
+      - '127.0.0.1:${SONARA_PORT:-3000}:3000'
+    depends_on:
+      api:
+        condition: service_started
+    healthcheck:
+      test: [CMD, node, -e, "fetch('http://127.0.0.1:3000').then(r=>process.exit(r.status===401?0:1)).catch(()=>process.exit(1))"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+volumes:
+  jobs:
+  models:

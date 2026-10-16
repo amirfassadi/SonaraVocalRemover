@@ -13,4 +13,6 @@ The web path now uses persistent asynchronous jobs rather than holding an HTTP r
 
 **Start here:** [setup, API and model switching](docs/KARAOKE_MVP.md).
 
+For a server install, see the [Docker Compose pilot and model benchmark](deploy/README.md).
+
 This is an implementation milestone, not a production speed or audio-quality certification. [Earlier CLI/Demucs documentation](docs/LEGACY_README.md) is historical; its HTTP deployment examples are superseded. The previous `copilot task/SONARA_MVP1_TASK_EN.md` describes an earlier backend-only task, not this mobile milestone.

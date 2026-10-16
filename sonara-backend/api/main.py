@@ -55,6 +55,7 @@ def create_app(settings=None):
             state = 'deleted' if job['remove'] else 'expired'
         return {'job_id': job['id'], 'filename': job['filename'], 'state': state,
                 'model_id': job['model']['definition']['id'], 'model_revision': job['model']['revision'],
+                'device': job['device'],
                 'created_at': job['created'], 'started_at': job['started'], 'finished_at': job['finished'],
                 'error': job['error'], 'cancel_requested': bool(job['cancel']),
                 'expires_at': job['finished'] + settings.retention if job['finished'] else None,

@@ -1,0 +1,10 @@
+# Use with compose.yaml and SONARA_DEVICE=cuda plus a matching TORCH_INDEX_URL.
+services:
+  worker:
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: 1
+              capabilities: [gpu]

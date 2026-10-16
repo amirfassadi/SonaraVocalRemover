@@ -1,0 +1,15 @@
+FROM python:3.12-slim
+ARG TORCH_INDEX_URL=https://download.pytorch.org/whl/cpu
+ENV PYTHONUNBUFFERED=1 PIP_NO_CACHE_DIR=1 SONARA_DATA_DIR=/data/jobs SONARA_MODEL_CACHE=/data/models
+RUN apt-get update && apt-get install -y --no-install-recommends ffmpeg gcc g++ \
+    && rm -rf /var/lib/apt/lists/*
+WORKDIR /app
+COPY requirements-light.txt requirements-worker.txt ./
+RUN pip install torch torchaudio --index-url "${TORCH_INDEX_URL}" \
+    && CC=gcc CXX=g++ pip install -r requirements-worker.txt \
+    && pip check
+RUN useradd --uid 10001 --create-home sonara \
+    && mkdir -p /data/jobs /data/models && chown -R sonara:sonara /data
+COPY --chown=sonara:sonara . .
+USER sonara
+CMD ["python", "-m", "sonara_vocal_remover.jobs.worker"]
