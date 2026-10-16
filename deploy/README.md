@@ -29,13 +29,17 @@ Adapt `deploy/nginx.conf.example` into the HTTPS server block for your domain. S
 
 API readiness stays unhealthy until the default model has a preparation receipt and the worker has a fresh heartbeat. The web UI remains accessible to show service status. Both Python processes run as UID 10001; Docker-managed volumes keep uploads/outputs and model cache across container replacement. The API mounts the cache read-only, while only worker/preparation can update it. No host CUDA/GPU is used in the CPU configuration.
 
+## RTX 4060 8 GB starting setup
+
+For the supplied i7 13th-generation / 32 GB / RTX 4060 8 GB host, see [RTX4060.md](RTX4060.md). It includes an explicit CUDA initializer and a kernel/memory diagnostic.
+
 ## NVIDIA option
 
 Install the NVIDIA driver and NVIDIA Container Toolkit on the target host. In `deploy/.env`, set `SONARA_DEVICE=cuda` and `TORCH_INDEX_URL` to the PyTorch CUDA wheel index compatible with that host. Use the override for **every** build, prepare and start command:
 
 ```bash
 docker compose --env-file deploy/.env -f compose.yaml -f compose.gpu.yaml build worker
-docker compose --env-file deploy/.env -f compose.yaml -f compose.gpu.yaml run --rm --no-deps worker python -c 'import torch; print(torch.__version__, torch.cuda.is_available()); assert torch.cuda.is_available()'
+docker compose --env-file deploy/.env -f compose.yaml -f compose.gpu.yaml run --rm --no-deps worker python -m sonara_vocal_remover.jobs.gpu_check
 docker compose --env-file deploy/.env -f compose.yaml -f compose.gpu.yaml run --rm --no-deps worker python -m sonara_vocal_remover.prepare_model bs_roformer_viperx
 docker compose --env-file deploy/.env -f compose.yaml -f compose.gpu.yaml run --rm --no-deps worker python -m sonara_vocal_remover.prepare_model melband_kim
 docker compose --env-file deploy/.env -f compose.yaml -f compose.gpu.yaml up -d --build

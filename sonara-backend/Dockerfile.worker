@@ -5,8 +5,9 @@ RUN apt-get update && apt-get install -y --no-install-recommends ffmpeg gcc g++ 
     && rm -rf /var/lib/apt/lists/*
 WORKDIR /app
 COPY requirements-light.txt requirements-worker.txt ./
-RUN pip install torch torchaudio --index-url "${TORCH_INDEX_URL}" \
-    && CC=gcc CXX=g++ pip install -r requirements-worker.txt \
+RUN pip install torch torchvision torchaudio --index-url "${TORCH_INDEX_URL}" \
+    && python -c 'from importlib.metadata import version; from pathlib import Path; Path("/tmp/torch-constraints.txt").write_text("".join(f"{p}=={version(p)}\n" for p in ("torch", "torchvision", "torchaudio")))' \
+    && CC=gcc CXX=g++ pip install -c /tmp/torch-constraints.txt -r requirements-worker.txt \
     && pip check
 RUN useradd --uid 10001 --create-home sonara \
     && mkdir -p /data/jobs /data/models && chown -R sonara:sonara /data

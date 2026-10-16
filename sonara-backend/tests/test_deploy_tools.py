@@ -88,3 +88,24 @@ def test_benchmark_timeout_still_requests_cleanup(tmp_path, monkeypatch):
     with pytest.raises(TimeoutError):
         bench.run_job(Session(), 'https://host', source, 'candidate', 60, timeout=-1)
     assert calls == ['https://host/api/jobs/abc']
+
+
+def test_cuda_initialization_requires_explicit_matching_wheel_index(tmp_path):
+    init = load_tool('init_deploy')
+    for device, index in (('cuda', None), ('cuda', 'https://download.pytorch.org/whl/cpu'),
+                          ('cpu', 'https://download.pytorch.org/whl/cu128'),
+                          ('cuda', 'https://untrusted.example/cu128'), ('bad', None)):
+        with pytest.raises(ValueError):
+            init.initialize(tmp_path / 'bad.env', 'https://karaoke.example.com', device, index)
+    assert not (tmp_path / 'bad.env').exists()
+    out = tmp_path / 'gpu.env'
+    init.initialize(out, 'https://karaoke.example.com', 'cuda', 'https://download.pytorch.org/whl/cu128')
+    assert 'SONARA_DEVICE=cuda\n' in out.read_text()
+    assert 'TORCH_INDEX_URL=https://download.pytorch.org/whl/cu128\n' in out.read_text()
+
+
+def test_gpu_diagnostic_fails_if_cuda_is_unavailable():
+    from types import SimpleNamespace
+    from sonara_vocal_remover.jobs.gpu_check import inspect_gpu
+    with pytest.raises(RuntimeError, match='CUDA unavailable'):
+        inspect_gpu(SimpleNamespace(cuda=SimpleNamespace(is_available=lambda: False)))
