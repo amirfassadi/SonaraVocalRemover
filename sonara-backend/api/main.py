@@ -1,190 +1,168 @@
-"""
-FastAPI service exposing VocalRemovalService over HTTP.
-
-This is the "Python Separation Service" the web frontend (built separately,
-e.g. via the AI Studio prompt) calls. It does not reimplement any
-separation logic — it's a thin HTTP wrapper around
-sonara_vocal_remover.service.VocalRemovalService, so the CLI, the Python
-API, and this HTTP API all share the exact same code path.
-
-Run with:
-    uvicorn api.main:app --host 0.0.0.0 --port 8000
-"""
-
+"""Private streaming upload API. Run the separate worker alongside this process."""
+import asyncio
+import hmac
+import re
 import shutil
-import tempfile
+import time
 import uuid
 from pathlib import Path
-from typing import Optional
-from urllib.parse import urlparse
-
-from fastapi import FastAPI, File, Form, HTTPException, UploadFile
-from fastapi.responses import JSONResponse
-from fastapi.staticfiles import StaticFiles
-
-from sonara_vocal_remover.config import DEFAULT_DEVICE, DEFAULT_MODEL, SUPPORTED_AUDIO_EXTENSIONS
-from sonara_vocal_remover.errors import (
-    BlockedUrlError,
-    DownloadTimeoutError,
-    FileTooLargeError,
-    InsufficientGPUMemoryError,
-    InvalidLocalFileError,
-    InvalidOutputPathError,
-    InvalidUrlError,
-    MissingFFmpegError,
-    MissingModelError,
-    ProcessingFailureError,
-    ProcessingTimeoutError,
-    SonaraError,
-    TooManyRedirectsError,
-    UnsupportedAudioFormatError,
-    UnsupportedUrlSchemeError,
-    UrlDownloadError,
-)
-from sonara_vocal_remover.models import ModelRegistry
-from sonara_vocal_remover.service import VocalRemovalService
-from sonara_vocal_remover.sources import LocalFileSource, UrlSource
-from sonara_vocal_remover.sources.url import _validate_url  # reused for /validate-url
-
-OUTPUT_ROOT = Path(tempfile.gettempdir()) / "sonara_jobs"
-OUTPUT_ROOT.mkdir(parents=True, exist_ok=True)
-
-app = FastAPI(title="Sonara Vocal Remover API", version="0.1.0-mvp")
-app.mount("/files", StaticFiles(directory=str(OUTPUT_ROOT)), name="files")
-
-# Maps each application error to an HTTP status code. Client errors (bad
-# input, blocked URL, unsupported format) -> 400. Server-side/environment
-# errors (missing ffmpeg, OOM, processing failure) -> 500/503.
-_ERROR_STATUS = {
-    InvalidLocalFileError: 400,
-    InvalidUrlError: 400,
-    UnsupportedUrlSchemeError: 400,
-    BlockedUrlError: 400,
-    UnsupportedAudioFormatError: 400,
-    InvalidOutputPathError: 400,
-    UrlDownloadError: 502,
-    DownloadTimeoutError: 504,
-    ProcessingTimeoutError: 504,
-    FileTooLargeError: 413,
-    TooManyRedirectsError: 502,
-    MissingFFmpegError: 503,
-    MissingModelError: 503,
-    InsufficientGPUMemoryError: 503,
-    ProcessingFailureError: 500,
-}
+from fastapi import FastAPI, HTTPException, Request
+from fastapi.responses import FileResponse, JSONResponse
+from starlette.concurrency import run_in_threadpool
+from sonara_vocal_remover.config import SUPPORTED_AUDIO_EXTENSIONS
+from sonara_vocal_remover.jobs import catalog
+from sonara_vocal_remover.jobs.settings import Settings
+from sonara_vocal_remover.jobs.store import Store
 
 
-def _error_response(exc: SonaraError) -> JSONResponse:
-    status = 500
-    for exc_type, code in _ERROR_STATUS.items():
-        if isinstance(exc, exc_type):
-            status = code
-            break
-    return JSONResponse(
-        status_code=status,
-        content={"error": {"type": type(exc).__name__, "message": str(exc)}},
-    )
+def create_app(settings=None):
+    settings = settings or Settings()
+    store = Store(settings.root)
+    app = FastAPI(title='Sonara Karaoke', version='0.2.0')
+    app.state.store = store
 
+    @app.middleware('http')
+    async def authenticate(request, call_next):
+        # Internal service token is injected by the same-origin web proxy, never the browser.
+        if not settings.token or not hmac.compare_digest(request.headers.get('x-sonara-token', ''), settings.token):
+            return JSONResponse({'error': {'code': 'unauthorized', 'message': 'دسترسی مجاز نیست.'}}, status_code=401)
+        owner = request.headers.get('x-sonara-owner', '')
+        if not re.fullmatch(r'[a-f0-9]{32}', owner):
+            return JSONResponse({'error': {'code': 'unauthorized', 'message': 'نشست معتبر نیست.'}}, status_code=401)
+        request.state.owner = owner
+        response = await call_next(request)
+        response.headers['Cache-Control'] = 'no-store'
+        response.headers['X-Content-Type-Options'] = 'nosniff'
+        return response
 
-@app.get("/api/health")
-def health():
-    """
-    Health check endpoint.
-    
-    Reports the default model and engine, plus all supported audio formats.
-    Note: the system may support multiple separation engines (Demucs, MSST, etc)
-    depending on available models in the registry, but this endpoint reports
-    the default configuration.
-    """
-    registry = ModelRegistry()
-    enabled_models = registry.list_enabled()
-    engines = set()
-    for model_def in enabled_models:
-        backend_name = (model_def.backend or {}).get("name", "unknown")
-        engines.add(backend_name)
-    engines.add("demucs")  # Default engine always available
-    
-    return {
-        "status": "ok",
-        "version": "0.1.0-mvp",
-        "engine": f"Demucs ({DEFAULT_MODEL})",
-        "default_model": DEFAULT_MODEL,
-        "supported_engines": sorted(engines),
-        "supported_formats": sorted(SUPPORTED_AUDIO_EXTENSIONS),
-    }
+    @app.exception_handler(HTTPException)
+    async def http_error(request, exc):
+        return JSONResponse({'error': {'code': exc.detail, 'message': exc.detail}}, status_code=exc.status_code)
 
+    def ready():
+        return (store.alive() and bool(shutil.which('ffmpeg')) and
+                shutil.disk_usage(settings.root).free >= settings.min_free_bytes)
 
-@app.post("/api/validate-url")
-def validate_url(payload: dict):
-    url = payload.get("url")
-    if not url or not isinstance(url, str):
-        return JSONResponse(status_code=400, content={"valid": False, "message": "URL is required"})
-    try:
-        _validate_url(url)
-    except SonaraError as exc:
-        return JSONResponse(status_code=400, content={"valid": False, "message": str(exc)})
+    def owned(job_id, owner):
+        job = store.get(job_id, owner)
+        if not job:
+            raise HTTPException(404, 'job_not_found')
+        return job
 
-    parsed = urlparse(url)
-    ext = Path(parsed.path).suffix.lower()
-    return {
-        "valid": True,
-        "hasValidExt": ext in SUPPORTED_AUDIO_EXTENSIONS,
-        "hostname": parsed.hostname,
-        "protocol": parsed.scheme,
-    }
+    def serialize(job):
+        state = job['state']
+        if state == 'succeeded' and (job['remove'] or time.time() - job['finished'] >= settings.retention):
+            state = 'deleted' if job['remove'] else 'expired'
+        return {'job_id': job['id'], 'filename': job['filename'], 'state': state,
+                'model_id': job['model']['definition']['id'], 'model_revision': job['model']['revision'],
+                'created_at': job['created'], 'started_at': job['started'], 'finished_at': job['finished'],
+                'error': job['error'], 'cancel_requested': bool(job['cancel']),
+                'expires_at': job['finished'] + settings.retention if job['finished'] else None,
+                'stems': {name: f"/api/jobs/{job['id']}/stems/{name}" for name in ('vocals', 'instrumental')} if state == 'succeeded' else {}}
 
+    @app.get('/api/health/live')
+    def live():
+        return {'status': 'ok'}
 
-@app.post("/api/separate")
-async def separate(
-    file: Optional[UploadFile] = File(None),
-    url: Optional[str] = Form(None),
-    model: str = Form(DEFAULT_MODEL),
-    device: str = Form(DEFAULT_DEVICE),
-):
-    if not file and not url:
-        raise HTTPException(status_code=400, detail="Provide either 'file' or 'url'")
-    if file and url:
-        raise HTTPException(status_code=400, detail="Provide only one of 'file' or 'url', not both")
+    @app.get('/api/health/ready')
+    def readiness():
+        models = catalog.available(settings.cache)
+        ok = ready() and any(m['id'] == settings.default_model for m in models)
+        return JSONResponse({'ready': ok}, status_code=200 if ok else 503)
 
-    job_id = str(uuid.uuid4())
-    job_dir = OUTPUT_ROOT / job_id
+    @app.get('/api/models')
+    def models():
+        return {'models': catalog.available(settings.cache), 'default_model': settings.default_model,
+                'worker_ready': ready(), 'max_bytes': settings.max_bytes, 'max_seconds': settings.max_seconds}
 
-    try:
-        if url:
-            source = UrlSource(url)
-        else:
-            ext = Path(file.filename or "").suffix.lower()
-            if ext not in SUPPORTED_AUDIO_EXTENSIONS:
-                supported = ", ".join(sorted(SUPPORTED_AUDIO_EXTENSIONS))
-                raise UnsupportedAudioFormatError(
-                    f"Unsupported extension '{ext}'. Supported: {supported}"
-                )
-            tmp_dir = Path(tempfile.mkdtemp(prefix="sonara_upload_"))
-            tmp_path = tmp_dir / f"upload{ext}"
-            with open(tmp_path, "wb") as f:
-                shutil.copyfileobj(file.file, f)
-            source = LocalFileSource(str(tmp_path), is_temporary=True)
+    @app.post('/api/jobs', status_code=202)
+    async def create(request: Request, filename: str, model_id: str | None = None):
+        if not ready():
+            raise HTTPException(503, 'service_not_ready')
+        if Path(filename).suffix.lower() not in SUPPORTED_AUDIO_EXTENSIONS:
+            raise HTTPException(422, 'unsupported_format')
+        if request.headers.get('content-type', '').split(';')[0] != 'application/octet-stream':
+            raise HTTPException(415, 'expected_audio_stream')
+        try:
+            selected = catalog.snapshot(model_id or settings.default_model, settings.cache)
+        except Exception:
+            raise HTTPException(422, 'model_not_ready')
+        job_id = uuid.uuid4().hex
+        try:
+            store.create(job_id, request.state.owner, Path(filename).name[:200], selected, settings.device, settings.max_pending)
+        except ValueError:
+            raise HTTPException(429, 'queue_full')
+        folder = settings.root / job_id
+        folder.mkdir()
+        size = 0
+        started = time.monotonic()
+        try:
+            with (folder / 'input').open('wb') as target:
+                async with asyncio.timeout(600):
+                    async for block in request.stream():
+                        size += len(block)
+                        if size > settings.max_bytes:
+                            raise HTTPException(413, 'file_too_large')
+                        if time.monotonic() - started > 600:
+                            raise HTTPException(408, 'upload_timeout')
+                        if shutil.disk_usage(settings.root).free < settings.min_free_bytes:
+                            raise HTTPException(503, 'storage_full')
+                        await run_in_threadpool(target.write, block)
+            if size == 0:
+                raise HTTPException(422, 'empty_file')
+            store.enqueue(job_id)
+            return serialize(store.get(job_id))
+        except TimeoutError:
+            store.finish(job_id, 'failed', 'upload_timeout')
+            shutil.rmtree(folder, ignore_errors=True)
+            raise HTTPException(408, 'upload_timeout')
+        except BaseException:
+            store.finish(job_id, 'failed', 'upload_failed')
+            shutil.rmtree(folder, ignore_errors=True)
+            raise
 
-        service = VocalRemovalService(model=model, device=device)
-        result = service.process(source=source, output_dir=str(job_dir))
+    @app.get('/api/jobs/{job_id}')
+    def status(job_id: str, request: Request):
+        return serialize(owned(job_id, request.state.owner))
 
-    except SonaraError as exc:
-        return _error_response(exc)
+    @app.post('/api/jobs/{job_id}/cancel', status_code=202)
+    def cancel(job_id: str, request: Request):
+        job = owned(job_id, request.state.owner)
+        if job['state'] in ('uploading', 'queued', 'running'):
+            store.request_cancel(job_id)
+        return serialize(store.get(job_id))
 
-    # Build response with new stems dict + legacy backward-compatible fields
-    response = {
-        "job_id": job_id,
-        "model": result.model,
-        "device": result.device,
-        "source_origin": result.source_origin,
-        "stems": {stem_name: f"/files/{job_id}/{stem_name}.wav" for stem_name in result.stems.keys()},
-    }
-    
-    # For backward compatibility with vocal-removal workflows:
-    # Always include vocals_url and instrumental_url if those stems exist
-    if "vocals" in result.stems:
-        response["vocals_url"] = f"/files/{job_id}/vocals.wav"
-    if "instrumental" in result.stems:
-        response["instrumental_url"] = f"/files/{job_id}/instrumental.wav"
-    
-    return response
+    @app.delete('/api/jobs/{job_id}', status_code=202)
+    def delete(job_id: str, request: Request):
+        owned(job_id, request.state.owner)
+        store.request_cancel(job_id, remove=True)
+        return {'job_id': job_id, 'state': 'deleting'}
+
+    def output(job_id, owner, name):
+        job = owned(job_id, owner)
+        if serialize(job)['state'] in ('expired', 'deleted'):
+            raise HTTPException(410, 'file_expired')
+        if job['state'] != 'succeeded':
+            raise HTTPException(409, 'job_not_complete')
+        path = settings.root / job_id / 'output' / name
+        if not path.is_file():
+            raise HTTPException(410, 'file_expired')
+        return path
+
+    @app.get('/api/jobs/{job_id}/stems/{name}')
+    def stem(job_id: str, name: str, request: Request):
+        if name not in ('vocals', 'instrumental'):
+            raise HTTPException(404, 'stem_not_found')
+        return FileResponse(output(job_id, request.state.owner, name + '.wav'), media_type='audio/wav')
+
+    @app.get('/api/jobs/{job_id}/download')
+    def download(job_id: str, request: Request):
+        return FileResponse(output(job_id, request.state.owner, 'karaoke.zip'), filename='Sonara-karaoke.zip')
+
+    @app.post('/api/separate')
+    def legacy():
+        raise HTTPException(410, 'use_async_jobs_api')
+
+    return app
+
+app = create_app()

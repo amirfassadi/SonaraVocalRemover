@@ -137,3 +137,9 @@ job_*/
 # ============================
 *.bak
 *.orig
+!sonara-backend/Models/**/model.yaml
+model_cache/
+sonara-data/
+*.sqlite*
+!sonara-backend/sonara_vocal_remover/jobs/
+!sonara-backend/sonara_vocal_remover/jobs/*.py

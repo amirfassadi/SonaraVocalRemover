@@ -1,0 +1,12 @@
+id: bs_roformer_viperx
+name: BS-RoFormer ViperX
+architecture: {type: bs_roformer}
+backend:
+  name: audio_separator
+  model_filename: model_bs_roformer_ep_317_sdr_12.9755.ckpt
+task: {category: vocal_separation}
+outputs: {required: [vocals, instrumental]}
+artifacts: {}
+status: {enabled: true, verified: false}
+runtime: {mdxc_params: {batch_size: 1}}
+notes: ["Candidate only; operator must prepare artifacts before it is selectable."]

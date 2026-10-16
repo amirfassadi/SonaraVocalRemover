@@ -75,7 +75,7 @@ def test_rejects_url_with_no_hostname():
         _validate_url("https:///path-with-no-host")
 
 
-def test_accepts_public_https_url():
-    # example.com resolves to a public IP; should pass validation
-    # (this does hit DNS — acceptable for a fast unit test, no network I/O beyond resolution)
+def test_accepts_public_https_url(monkeypatch):
+    import socket
+    monkeypatch.setattr(socket, 'getaddrinfo', lambda *_: [(socket.AF_INET, socket.SOCK_STREAM, 6, '', ('93.184.216.34', 443))])
     _validate_url("https://example.com/audio/song.mp3")
